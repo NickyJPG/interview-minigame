@@ -50,7 +50,6 @@
     .left{grid-area:left}
     .right{grid-area:right}
     .actions{display:flex; gap:12px}
-    /* Show controls on touch/narrow screens */
     .mobileControls{display:none}
     @media (hover:none), (max-width: 860px){
       .mobileControls{display:flex}
@@ -120,7 +119,7 @@ const ctx=c.getContext('2d');
 ctx.imageSmoothingEnabled=false;
 const T=16, W=20, H=15; // 320x240
 
-/* Map (0=floor, 1=wall, 2=desk, 3=bookshelf, 4=vending, 5=plant, 6=cabinet, 7=chair) */
+/* Map */
 const MAP=[
  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
  1,0,0,0,0,3,0,0,0,0,0,0,0,0,0,6,0,5,0,1,
@@ -174,7 +173,8 @@ function drawChibi(kind,x,y,dir,blinkOn,tick){
 let mode='walk'; // walk | menu | dialog
 let menuIndex=0; let answered={};
 let dialog=null; // {pages:[{s,t}], p, i, done}
-let justClosedDialog=false; // guard to avoid instant reopen
+let justClosedDialog=false;
+let introActive=false; // NEW: true only for the very first line
 
 function openMenu(){ mode='menu'; menuIndex=0; playSfx('menu'); }
 function closeMenu(){ mode='walk'; playSfx('back'); }
@@ -188,12 +188,24 @@ function wrapText(t,x,y,maxW,lh){ const words=t.split(' '); let line=''; for(con
 
 /* Controls */
 const keys=Object.create(null);
-window.addEventListener('keydown',e=>{ keys[e.key]=true; if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();});
+
+function dismissIntroIfActive(){
+  if(introActive && dialog){
+    dialog=null; mode='walk'; introActive=false; justClosedDialog=true;
+  }
+}
+
+window.addEventListener('keydown',e=>{
+  // Any key during the very first intro line dismisses it
+  if(!['Shift','Meta','Alt','Control','CapsLock','Tab'].includes(e.key)) dismissIntroIfActive();
+  keys[e.key]=true;
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+});
 window.addEventListener('keyup',e=>{
   keys[e.key]=false;
-  // also clear the guard on real keyboard keyup
   if(!keys['Enter'] && !keys[' ']){ if(justClosedDialog) justClosedDialog=false; }
 });
+
 function near(a,b){ return Math.hypot((a.x-b.x),(a.y-b.y))<18; }
 function tryMove(obj,dx,dy){ const nx=obj.x+dx, ny=obj.y+dy; const tx=Math.floor((nx+8)/T), ty=Math.floor((ny+14)/T); if(!blocked(tx,ty)){ obj.x=nx; obj.y=ny; } }
 
@@ -222,7 +234,6 @@ function update(dt){
     if(keys['ArrowDown']||keys['s']){ tryMove(player,0, 1.2); player.dir='down'; moved=true; }
     if(keys['ArrowLeft']||keys['a']){ tryMove(player,-1.2,0); player.dir='left'; moved=true; }
     if(keys['ArrowRight']||keys['d']){ tryMove(player, 1.2,0); player.dir='right'; moved=true; }
-    // Interaction only when near, Enter/Space, and not just closed
     if(!justClosedDialog && (keys['Enter']||keys[' ']) && near(player,npc)){
       openMenu(); keys['Enter']=keys[' ']=false;
     }
@@ -241,7 +252,6 @@ function update(dt){
       else { dialog=null; mode='walk'; justClosedDialog=true; }
       keys['Enter']=keys[' ']=false;
     }
-    // Back from any dialog (including intro) returns to walking, not the menu
     if(keys['Escape']||keys['x']||keys['Backspace']){
       dialog=null; mode='walk'; justClosedDialog=true;
       keys['Escape']=keys['x']=keys['Backspace']=false;
@@ -276,6 +286,7 @@ resetBtn.addEventListener('click', ()=>{
 window.addEventListener('load', ()=>{
   dialog={pages:[{s:'Nick',t:'Thanks for scanning. Walk up to the interviewer and press Enter to start.'}],p:0,i:0,done:false};
   mode='dialog';
+  introActive=true; // NEW
 });
 
 /* Error overlay */
@@ -286,12 +297,14 @@ const controlsRoot = document.querySelector('.mobileControls');
 
 function setKey(key, down){
   try{ audio(); }catch{}
+  // Any control press should dismiss the very first intro line
+  dismissIntroIfActive();
+
   if(key==='Enter' || key==='Escape' || key===' '){
     keys[key]=down;
     if(down){
       setTimeout(()=>{
         keys[key]=false;
-        // also clear guard for touch users so Enter works again
         if(key==='Enter' || key===' '){ justClosedDialog=false; }
       }, 140);
     } else {
@@ -309,7 +322,7 @@ function setKey(key, down){
   }, {passive:false});
 });
 
-// pointer events so multi-press works
+// pointer events for controls
 controlsRoot.querySelectorAll('[data-key]').forEach(btn=>{
   const k = btn.getAttribute('data-key');
   btn.addEventListener('pointerdown', e=>{
@@ -330,7 +343,10 @@ controlsRoot.querySelectorAll('[data-key]').forEach(btn=>{
   });
 });
 
-// double-tap canvas to Enter as a bonus
+// bonus: tap canvas to dismiss intro or trigger Enter
+c.addEventListener('pointerdown', ()=>{
+  if(introActive) dismissIntroIfActive();
+});
 document.addEventListener('dblclick', e=>{
   if(e.target===c){ setKey('Enter', true); }
 });
